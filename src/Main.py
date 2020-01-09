@@ -13,7 +13,7 @@ model.add_layer(5, 'relu')
 model.add_layer(1, "sigmoid")
 model.learning_rate = 0.05
 
-model.fit(X_train, Y_train, 1000, verbose=True)
+model.fit(X_train, Y_train, 1000, verbose=True, print_every=10)
 
 prediction_train = model.predict(X_train)
 prediction_test = model.predict(X_test)

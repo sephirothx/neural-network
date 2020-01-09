@@ -2,30 +2,38 @@ import numpy as np
 from Utils import sigmoid, relu, sigmoid_derivative, relu_derivative, tanh_derivative
 
 class NeuralNetwork:
+    _d_best_init = {'sigmoid': 'xavier',
+                    'tanh': 'xavier',
+                    'relu': 'he'}
+    _d_act = {'sigmoid': (sigmoid, sigmoid_derivative),
+              'tanh': (np.tanh, tanh_derivative),
+              'relu': (relu, relu_derivative)}
+
     def __init__(self):
         """
         Implements a simple deep neural network.
         """
         self.L = 0
         self.learning_rate = 0.05
-        self.__parameters = []
-        self.__d_act = {'sigmoid': (sigmoid, sigmoid_derivative),
-                        'tanh': (np.tanh, tanh_derivative),
-                        'relu': (relu, relu_derivative)}
+        self._parameters = []
 
-    def add_layer(self, nodes, activation, inputs=None):
+    def add_layer(self, nodes, activation, *, inputs=None, initialization=None):
         """
         Adds a single hidden layer to the network.
 
         :param nodes: number of hidden nodes
         :param activation: activation function ('sigmoid', 'tanh', 'relu')
         :param inputs: number of inputs
+        :param initialization: method used to initialize the W matrix ('he', 'xavier', 'zeros').
+         If no value is provided the supposedly best one will be chosen by default.
         """
         if inputs is None:
-            inputs = self.__parameters[-1]['W'].shape[0]
-        self._add_layer_private(inputs, nodes, activation)
+            inputs = self._parameters[-1]['W'].shape[0]
+        if initialization is None:
+            initialization = self._d_best_init[activation]
+        self._add_layer_private(inputs, nodes, activation, initialization)
 
-    def fit(self, X, Y, iterations, verbose=False):
+    def fit(self, X, Y, iterations, verbose=False, print_every=100):
         """
         Trains the neural network using train inputs and outputs.
 
@@ -33,6 +41,7 @@ class NeuralNetwork:
         :param Y: train outputs
         :param iterations: number of iterations
         :param verbose: makes the process print outputs
+        :param print_every: every how many iterations the outputs will be printed
         """
         for i in range(iterations):
             A, a_cache = self._forward_propagation(X)
@@ -40,7 +49,7 @@ class NeuralNetwork:
             self._update_parameters(grads, self.learning_rate)
 
             cost = self._compute_cost(Y, A)
-            if verbose and (i == 0 or (i+1) % 100 == 0):
+            if verbose and (i == 0 or (i+1) % print_every == 0):
                 accuracy = self._compute_accuracy(Y, A)
                 print(f"Iteration {i+1:<4} cost: {cost:>7.5f} accuracy: {accuracy:>5.2f}%")
 
@@ -54,20 +63,39 @@ class NeuralNetwork:
         A, _ = self._forward_propagation(X)
         return np.round(A)
 
-    @staticmethod
-    def _initialize_parameters(inputs, nodes):
+    @classmethod
+    def _initialize_parameters(cls, inputs, nodes, initialization):
         """
         Randomly initializes parameters for a single layer.
 
         :param inputs: number of inputs
         :param nodes: number of hidden nodes
+        :param initialization: method used to initialize the W matrix
         :return: W and b
         """
-        W = np.random.randn(nodes, inputs) / np.sqrt(inputs)
+        if initialization == 'he':
+            W = cls._init_parameters_he(inputs, nodes)
+        elif initialization == 'xavier':
+            W = cls._init_parameters_xavier(inputs, nodes)
+        else:
+            W = cls._init_parameters_zeros(inputs, nodes)
+
         b = np.zeros((nodes, 1))
 
         parameters = {'W': W, 'b': b}
         return parameters
+
+    @staticmethod
+    def _init_parameters_xavier(inputs, nodes):
+        return np.random.randn(nodes, inputs) * np.sqrt(2 / (inputs+nodes))
+
+    @staticmethod
+    def _init_parameters_he(inputs, nodes):
+        return np.random.randn(nodes, inputs) * np.sqrt(2 / inputs)
+
+    @staticmethod
+    def _init_parameters_zeros(inputs, nodes):
+        return np.zeros((nodes, inputs))
 
     @staticmethod
     def _compute_cost(Y, A):
@@ -99,7 +127,7 @@ class NeuralNetwork:
         :param activation: name of the activation
         :return: activation function
         """
-        return self.__d_act[activation][0]
+        return self._d_act[activation][0]
 
     def _get_derivative_function(self, activation):
         """
@@ -108,20 +136,21 @@ class NeuralNetwork:
         :param activation: name of the activation
         :return: derivative of the activation function
         """
-        return self.__d_act[activation][1]
+        return self._d_act[activation][1]
 
-    def _add_layer_private(self, inputs, nodes, activation):
+    def _add_layer_private(self, inputs, nodes, activation, initialization):
         """
         Does the operations to add a new layer to the network.
 
         :param inputs: number of inputs
         :param nodes: number of nodes
         :param activation: activation function ('sigmoid', 'tanh', 'relu')
+        :param initialization: method used to initialize the W matrix ('he', 'xavier', 'zeros')
         """
         self.L += 1
-        parameters = self._initialize_parameters(inputs, nodes)
+        parameters = self._initialize_parameters(inputs, nodes, initialization)
         parameters['a'] = activation
-        self.__parameters.append(parameters)
+        self._parameters.append(parameters)
 
     def _forward_propagation(self, X):
         """
@@ -132,7 +161,7 @@ class NeuralNetwork:
         """
         A = X
         a_cache = []
-        for parameters in self.__parameters:
+        for parameters in self._parameters:
             W = parameters['W']
             b = parameters['b']
             activation = self._get_activation_function(parameters['a'])
@@ -156,10 +185,10 @@ class NeuralNetwork:
         m = X.shape[1]
         A = a_cache.pop()
         dA = (1-Y)/(1-A) - Y/A
-        for l in reversed(range(self.L)):
-            next_A = a_cache.pop() if l!=0 else X
+        for layer in reversed(range(self.L)):
+            next_A = a_cache.pop() if layer != 0 else X
 
-            parameters = self.__parameters[l]
+            parameters = self._parameters[layer]
             W = parameters['W']
             derivative = self._get_derivative_function(parameters['a'])
 
@@ -181,6 +210,6 @@ class NeuralNetwork:
         :param grads: gradients
         :param learning_rate: learning rate
         """
-        for l in range(self.L):
-            self.__parameters[l]['W'] -= learning_rate * grads[l]['dW']
-            self.__parameters[l]['b'] -= learning_rate * grads[l]['db']
+        for layer in range(self.L):
+            self._parameters[layer]['W'] -= learning_rate * grads[layer]['dW']
+            self._parameters[layer]['b'] -= learning_rate * grads[layer]['db']
