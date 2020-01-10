@@ -16,6 +16,9 @@ class NeuralNetwork:
         self.L = 0
         self.learning_rate = 0.05
         self._parameters = []
+        self._regularization = lambda m: 0
+        self._regularization_back = lambda m, W: 0
+        self._lambd = 0.01
 
     def add_layer(self, nodes, activation, *, inputs=None, initialization=None):
         """
@@ -33,7 +36,24 @@ class NeuralNetwork:
             initialization = self._d_best_init[activation]
         self._add_layer_private(inputs, nodes, activation, initialization)
 
-    def fit(self, X, Y, iterations, verbose=False, print_every=100):
+    def compile(self, *, learning_rate=None, regularization=None, lambd=None):
+        """
+        Completes the initialization of the neural network providing the last details.
+
+        :param learning_rate: learning rate
+        :param regularization: regularization method ('L2')
+        :param lambd: coefficient for the regularization
+        :return:
+        """
+        if regularization in ('l2', 'L2'):
+            self._regularization = self._l2_regularization
+            self._regularization_back = self._l2_regularization_back
+        if learning_rate is not None:
+            self.learning_rate = learning_rate
+        if lambd is not None:
+            self._lambd = lambd
+
+    def fit(self, X, Y, iterations, verbose=False, step=100):
         """
         Trains the neural network using train inputs and outputs.
 
@@ -41,17 +61,23 @@ class NeuralNetwork:
         :param Y: train outputs
         :param iterations: number of iterations
         :param verbose: makes the process print outputs
-        :param print_every: every how many iterations the outputs will be printed
+        :param step: every how many iterations the outputs will be stored
         """
+        costs = []
         for i in range(iterations):
             A, a_cache = self._forward_propagation(X)
             grads = self._backward_propagation(X, Y, a_cache)
             self._update_parameters(grads, self.learning_rate)
 
             cost = self._compute_cost(Y, A)
-            if verbose and (i == 0 or (i+1) % print_every == 0):
-                accuracy = self._compute_accuracy(Y, A)
-                print(f"Iteration {i+1:<4} cost: {cost:>7.5f} accuracy: {accuracy:>5.2f}%")
+            if i == 0 or (i+1) % step == 0:
+                costs.append(cost)
+                if verbose:
+                    accuracy = self._compute_accuracy(Y, A)
+                    print(f"Iteration {i+1:<4} "
+                          f"cost: {cost:>7.5f} "
+                          f"accuracy: {accuracy:>5.2f}%")
+        return costs
 
     def predict(self, X):
         """
@@ -98,18 +124,6 @@ class NeuralNetwork:
         return np.zeros((nodes, inputs))
 
     @staticmethod
-    def _compute_cost(Y, A):
-        """
-        Computes the cost of the iteration using binary cross-entropy.
-
-        :param Y: expected results
-        :param A: predictions
-        :return: cost
-        """
-        m = Y.shape[1]
-        return -1/m * np.sum(Y * np.log(A) + (1-Y) * np.log(1-A))
-
-    @staticmethod
     def _compute_accuracy(Y, A):
         """
         Computes the % accuracy after the iteration.
@@ -152,6 +166,23 @@ class NeuralNetwork:
         parameters['a'] = activation
         self._parameters.append(parameters)
 
+    def _l2_regularization(self, m):
+        return self._lambd / (2*m) * np.sum([np.sum(np.square(p['W'])) for p in self._parameters])
+
+    def _l2_regularization_back(self, m, W):
+        return self._lambd / m * W
+
+    def _compute_cost(self, Y, A):
+        """
+        Computes the cost of the iteration using binary cross-entropy.
+
+        :param Y: expected results
+        :param A: predictions
+        :return: cost
+        """
+        m = Y.shape[1]
+        return -1/m * np.sum(Y * np.log(A) + (1-Y) * np.log(1-A)) + self._regularization(m)
+
     def _forward_propagation(self, X):
         """
         Computes the forward propagation steps for the neural network.
@@ -193,7 +224,7 @@ class NeuralNetwork:
             derivative = self._get_derivative_function(parameters['a'])
 
             dZ = dA * derivative(A)
-            dW = 1/m * (dZ @ next_A.T)
+            dW = 1/m * (dZ @ next_A.T) + self._regularization_back(m, W)
             db = 1/m * np.sum(dZ, axis=1, keepdims=True)
             dA = W.T @ dZ
 
